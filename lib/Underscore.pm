@@ -3,11 +3,7 @@ package Underscore;
 use strict;
 use warnings;
 
-our $VERSION = '0.01';
-
-use base 'Exporter';
-
-our @EXPORT_OK = qw(_);
+our $VERSION = '0.03';
 
 use B               ();
 use List::MoreUtils ();
@@ -15,6 +11,17 @@ use List::Util      ();
 use Scalar::Util    ();
 
 our $UNIQUE_ID = 0;
+
+sub import {
+    my $class = shift;
+    my (%options) = @_;
+
+    my $name = $options{-as} || '_';
+
+    my $package = caller;
+    no strict;
+    *{"$package\::$name"} = \&_;
+}
 
 sub _ {
     return new(__PACKAGE__, args => [@_]);
@@ -54,11 +61,16 @@ sub each {
     }
 }
 
+sub collect {&map}
+
 sub map {
     my $self = shift;
     my ($array, $cb, $context) = $self->_prepare(@_);
 
-    my $result = [map { $cb->($_, undef, $context) } @$array];
+    $context = $array unless defined $context;
+
+    my $index = 0;
+    my $result = [map { $cb->($_, ++$index, $context) } @$array];
 
     return $self->_finalize($result);
 }
@@ -76,7 +88,7 @@ sub include {
         return (List::Util::first { $_ eq $value } values %$list) ? 1 : 0;
     }
 
-    die 'WTF?';
+    die 'include only supports arrays and hashes';
 }
 
 sub inject {&reduce}
@@ -86,16 +98,21 @@ sub reduce {
     my $self = shift;
     my ($array, $iterator, $memo, $context) = $self->_prepare(@_);
 
-    die 'TypeError' if !defined $array && !defined $memo;
+    die 'No list or memo' if !defined $array && !defined $memo;
 
-    # TODO
-    $memo = 0 unless defined $memo;
     return $memo unless defined $array;
 
-    foreach (@$array) {
-        $memo = $iterator->($memo, $_, $context) if defined $_;
-    }
+    my $initial = defined $memo;
 
+    foreach (@$array) {
+        if (!$initial && defined $_) {
+            $memo = $_;
+            $initial = 1;
+        } else {
+            $memo = $iterator->($memo, $_, $context) if defined $_;
+        }
+    }
+    die 'No memo' if !$initial;
     return $self->_finalize($memo);
 }
 
@@ -106,18 +123,14 @@ sub reduce_right {
     my $self = shift;
     my ($array, $iterator, $memo, $context) = $self->_prepare(@_);
 
-    die 'TypeError' if !defined $array && !defined $memo;
+    die 'No list or memo' if !defined $array && !defined $memo;
 
-    # TODO
-    $memo = '' unless defined $memo;
     return $memo unless defined $array;
 
-    foreach (reverse @$array) {
-        $memo = $iterator->($memo, $_, $context) if defined $_;
-    }
-
-    return $memo;
+    return _->reduce([reverse @$array], $iterator, $memo, $context);
 }
+
+sub find {&detect}
 
 sub detect {
     my $self = shift;
@@ -165,7 +178,7 @@ sub any {
     my $self = shift;
     my ($list, $iterator, $context) = $self->_prepare(@_);
 
-    return 0 unless defined @$list;
+    return 0 unless @$list;
 
     foreach (@$list) {
         return 1 if $iterator ? $iterator->($_) : $_;
@@ -198,7 +211,25 @@ sub pluck {
         push @$result, $_->{$key};
     }
 
-    return $result;
+    return $self->_finalize($result);
+}
+
+sub _minmax {
+    my $self = shift;
+    my ($list, $iterator, $context, $behaviour) = $self->_prepare(@_);
+
+    my $computed_list = [map {
+        { original => $_, computed => $iterator->($_, $context) }
+    } @$list];
+
+    return _->reduce(
+        $computed_list
+        , sub {
+            my ($memo, $e) = @_;
+            return $behaviour->($memo, $e);
+        }
+        , $computed_list->[0]
+    )->{original};
 }
 
 sub max {
@@ -207,7 +238,10 @@ sub max {
 
     return List::Util::max(@$list) unless defined $iterator;
 
-    return List::Util::max(map { $iterator->($_) } @$list);
+    return _->_minmax($list, $iterator, $context, sub {
+        my ($max, $e) = @_;
+        return ($e->{computed} > $max->{computed}) ? $e: $max;
+    });
 }
 
 sub min {
@@ -216,23 +250,28 @@ sub min {
 
     return List::Util::min(@$list) unless defined $iterator;
 
-    return List::Util::min(map { $iterator->($_) } @$list);
+    return _->_minmax($list, $iterator, $context, sub {
+        my ($min, $e) = @_;
+        return ($e->{computed} < $min->{computed}) ? $e: $min;
+    });
 }
 
 sub sort : method {
     my $self = shift;
     my ($list) = $self->_prepare(@_);
 
-    return [sort @$list];
+    return $self->_finalize([sort @$list]);
 }
 
 sub sortBy {&sort_by}
 
 sub sort_by {
     my $self = shift;
-    my ($list, $iterator, $context) = $self->_prepare(@_);
+    my ($list, $iterator, $context, $comparator) = $self->_prepare(@_);
 
-    my $result = [sort { $a cmp $iterator->($b) } @$list];
+    my $cmp = defined $comparator ? $comparator : sub { my ($x, $y) = @_; $x <=> $y } ;
+
+    my $result = [sort { $cmp->($iterator->($a, $context), $iterator->($b, $context)) } @$list];
 
     return $self->_finalize($result);
 }
@@ -275,24 +314,46 @@ sub pop : method {
     return $self->_finalize($result);
 }
 
-sub groupBy {&group_by}
-
-sub group_by {
+sub _partition {
     my $self = shift;
-    my ($list, $iterator) = $self->_prepare(@_);
+    my ($list, $iterator, $behaviour) = $self->_prepare(@_);
 
     my $result = {};
     foreach (@{$list}) {
         my $group = $iterator->($_);
+        $behaviour->($result, $group, $_);
+    }
+    return $self->_finalize($result);
+}
+
+sub groupBy {&group_by}
+
+sub group_by {
+    my $self = shift;
+    return $self->_partition(@_, sub {
+        my ($result, $group, $o) = @_;
         if (exists $result->{$group}) {
-            push @{$result->{$group}}, $_;
+            push @{$result->{$group}}, $o;
         }
         else {
-            $result->{$group} = [$_];
+            $result->{$group} = [$o];
         }
-    }
+    });
+}
 
-    return $self->_finalize($result);
+sub countBy {&count_by}
+
+sub count_by {
+    my $self = shift;
+    return $self->_partition(@_, sub {
+        my ($result, $group, $o) = @_;
+        if (exists $result->{$group}) {
+            $result->{$group} = $result->{$group} + 1;
+        }
+        else {
+            $result->{$group} = 1;
+        }
+    });
 }
 
 sub sortedIndex {&sorted_index}
@@ -348,6 +409,9 @@ sub size {
     return 1;
 }
 
+sub head {&first}
+sub take {&first}
+
 sub first {
     my $self = shift;
     my ($array, $n) = $self->_prepare(@_);
@@ -355,6 +419,15 @@ sub first {
     return $array->[0] unless defined $n;
 
     return [@{$array}[0 .. $n - 1]];
+}
+
+sub initial {
+    my $self = shift;
+    my ($array, $n) = $self->_prepare(@_);
+
+    $n = scalar @$array - 1 unless defined $n;
+    
+    return $self->take($array, $n);
 }
 
 sub tail {&rest}
@@ -373,6 +446,13 @@ sub last {
     my ($array) = $self->_prepare(@_);
 
     return $array->[-1];
+}
+
+sub shuffle {
+    my $self = shift;
+    my ($array) = $self->_prepare(@_);
+
+    return [List::Util::shuffle @$array];
 }
 
 sub compact {
@@ -424,6 +504,8 @@ sub without {
 
     return $new_array;
 }
+
+sub unique {&uniq}
 
 sub uniq {
     my $self = shift;
@@ -480,6 +562,70 @@ sub difference {
     return $new_array;
 }
 
+sub object {
+    my $self = shift;
+    my (@arrays) = $self->_prepare(@_);
+
+    my $object = {};
+    my $arrays_length = scalar @arrays;
+    if ($arrays_length == 2) {
+        my ($keys, $values) = @arrays;
+        foreach my $i (0..scalar @$keys - 1) {
+            my $key   = $keys->[$i];
+            my $value = $values->[$i];
+            $object->{$key} = $value;
+        }
+    } elsif ($arrays_length == 1) {
+        _->reduce($arrays[0]
+                , sub {
+                    my ($o, $pair) = @_;
+                    $o->{$pair->[0]} = $pair->[1];
+                    return $o;
+                }
+                , $object
+        );
+    }
+    return $object;
+}
+
+sub pairs {
+    my $self = shift;
+    my ($hash) = $self->_prepare(@_);
+
+    return [map { [ $_ => $hash->{$_} ] } keys %$hash ];
+}
+
+sub pick {
+    my $self = shift;
+    my ($hash, @picks) = $self->_prepare(@_);
+
+    return _->reduce(
+        _->flatten(\@picks)
+        , sub {
+            my ($o, $pick) = @_;
+            $o->{$pick} = $hash->{$pick};
+            return $o;
+        }
+        , {}
+    );
+}
+
+sub omit {
+    my $self = shift;
+    my ($hash, @omits) = $self->_prepare(@_);
+
+    my %omit_these = map { $_ => $_ } @{_->flatten(\@omits)};
+    return _->reduce(
+        [keys %$hash]
+        , sub {
+            my ($o, $key) = @_;
+            $o->{$key} = $hash->{$key} unless exists $omit_these{$key};
+            return $o;
+        }
+        , {}
+    );
+}
+
 sub zip {
     my $self = shift;
     my (@arrays) = $self->_prepare(@_);
@@ -494,7 +640,6 @@ sub zip {
             map $_->[$ix], @_;
           } 0 .. $max
     ];
-
 }
 
 sub indexOf {&index_of}
@@ -530,8 +675,12 @@ sub range {
 
     return [$start .. $stop - 1] unless defined $step;
 
+    my $test = ($start < $stop)
+        ? sub { $start < $stop }
+        : sub { $start > $stop };
+
     my $new_array = [];
-    while ($start < $stop) {
+    while ($test->()) {
         push @$new_array, $start;
         $start += $step;
     }
@@ -566,6 +715,14 @@ sub unique_id {
     return $prefix . ($UNIQUE_ID++);
 }
 
+sub result {
+    my $self = shift;
+    my ($hash, $key, @args) = $self->_prepare(@_);
+
+    my $value = $hash->{$key};
+    return ref $value eq 'CODE' ? $value->(@args) : $value;
+}
+
 sub times {
     my $self = shift;
     my ($n, $iterator) = $self->_prepare(@_);
@@ -573,6 +730,16 @@ sub times {
     for (0 .. $n - 1) {
         $iterator->($_);
     }
+}
+
+sub after {
+    my $self = shift;
+    my ($n, $func, @args) = $self->_prepare(@_);
+
+    my $invocation_count = 0;
+    return sub {
+        return ++$invocation_count >= $n ? $func->(@args) : undef;
+    };
 }
 
 sub template_settings {
@@ -906,7 +1073,7 @@ __END__
 
 =head1 NAME
 
-Underscore
+Underscore - Perl port of Underscore.js
 
 =head1 SYNOPSIS
 
@@ -919,6 +1086,22 @@ Underscore
 L<Underscore> Perl is a clone of a popular JavaScript library
 L<http://github.com/documentcloud/underscore|Underscore.js>. Why? Because Perl
 is awesome. And because we can!
+
+                      /\ \
+     __  __    ___    \_\ \     __   _ __   ____    ___    ___   _ __    __
+    /\ \/\ \ /' _ `\  /'_` \  /'__`\/\`'__\/',__\  /'___\ / __`\/\`'__\/'__`\
+    \ \ \_\ \/\ \/\ \/\ \ \ \/\  __/\ \ \//\__, `\/\ \__//\ \ \ \ \ \//\  __/
+     \ \____/\ \_\ \_\ \___,_\ \____\\ \_\\/\____/\ \____\ \____/\ \_\\ \____\
+      \/___/  \/_/\/_/\/__,_ /\/____/ \/_/ \/___/  \/____/\/___/  \/_/ \/____/
+                                                       ___
+                 __                                   /\_ \
+                /\_\    ___       _____      __   _ __\//\ \
+                \/\ \ /' _ `\    /\ '__`\  /'__`\/\`'__\\ \ \
+                 \ \ \/\ \/\ \   \ \ \ \ \/\  __/\ \ \/  \_\ \_
+                  \ \_\ \_\ \_\   \ \ ,__/\ \____\\ \_\  /\____\
+                   \/_/\/_/\/_/    \ \ \/  \/____/ \/_/  \/____/
+                                    \ \_\
+                                     \/_/
 
 This document describes the differences. For the full introduction see original
 page of L<http://documentcloud.github.com/underscore/|Underscore.js>.
@@ -940,7 +1123,7 @@ loops and async programming.
 
 =head2 Implementation details
 
-Most of the functions are just wrappers around built-in functions.  Others use
+Most of the functions are just wrappers around built-in functions. Others use
 L<List::Util> and L<List::MoreUtils> modules.
 
 Numeric/String detection is done the same way L<JSON::PP> does it: by using
@@ -954,15 +1137,12 @@ strings depending on the context.
 
 =head2 Object-Oriented and Functional Styles
 
-As original Underscore.js you can use Perl version in either an object-oriented
-or a functional style, depending on your preference. The following two lines of
-code are identical ways to double a list of numbers.
+You can use Perl version in either an object-oriented or a functional style,
+depending on your preference. The following two lines of code are identical
+ways to double a list of numbers.
 
     _->map([1, 2, 3], sub { my ($n) = @_; $n * 2; });
     _([1, 2, 3])->map(sub { my ($n) = @_; $n * 2; });
-
-See L<http://documentcloud.github.com/underscore/#styles|original documentation>
- why sometimes object-oriented style is better.
 
 =head1 DEVELOPMENT
 
@@ -972,15 +1152,17 @@ See L<http://documentcloud.github.com/underscore/#styles|original documentation>
 
 =head1 CREDITS
 
-Undescore.js authors and contributors.
+Undescore.js authors and contributors
 
-=head1 AUTHOR
+=head1 AUTHORS
 
-Viacheslav Tykhanovskyi, C<vti@cpan.org>.
+Viacheslav Tykhanovskyi, C<vti@cpan.org>
+Rich Douglas Evans, C<rich.douglas.evans@gmail.com>
 
 =head1 COPYRIGHT AND LICENSE
 
 Copyright (C) 2011-2012, Viacheslav Tykhanovskyi
+Copyright (C) 2013 Rich Douglas Evans
 
 This program is free software, you can redistribute it and/or modify it under
 the terms of the Artistic License version 2.0.
