@@ -8,7 +8,7 @@ configure_requires:
   CPAN::Meta::Prereqs: 0
   Module::Build: 0.38
 dynamic_config: 0
-generated_by: 'Minilla/v0.4.3, CPAN::Meta::Converter version 2.130880'
+generated_by: 'Minilla/v0.7.5, CPAN::Meta::Converter version 2.130880'
 license: unknown
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
@@ -23,10 +23,11 @@ no_index:
     - eg
     - examples
     - author
+    - builder
 provides:
   Underscore:
     file: lib/Underscore.pm
-    version: 0.03
+    version: 0.04
 requires:
   B: 0
   List::MoreUtils: 0
@@ -35,7 +36,7 @@ resources:
   bugtracker: https://github.com/vti/underscore-perl/issues
   homepage: https://github.com/vti/underscore-perl
   repository: git://github.com/vti/underscore-perl
-version: 0.03
+version: 0.04
 x_contributors:
   - 'richdouglasevans <rich.douglas.evans@gmail.com>'
   - 'vti <viacheslav.t@gmail.com>'

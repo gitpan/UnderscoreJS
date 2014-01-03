@@ -2,6 +2,7 @@ Changes
 LICENSE
 cpanfile
 lib/Underscore.pm
+minil.toml
 t/arrays.t
 t/chaining.t
 t/collections.t
