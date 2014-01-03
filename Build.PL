@@ -23,8 +23,8 @@ my %args = (
         'Module::Build' => 0.38,
     },
 
-    name            => 'Underscore',
-    module_name     => 'Underscore',
+    name            => 'UnderscoreJS',
+    module_name     => 'UnderscoreJS',
     allow_pureperl => 0,
 
     script_files => [glob('script/*'), glob('bin/*')],

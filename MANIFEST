@@ -1,7 +1,7 @@
 Changes
 LICENSE
 cpanfile
-lib/Underscore.pm
+lib/UnderscoreJS.pm
 minil.toml
 t/arrays.t
 t/chaining.t
