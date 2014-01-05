@@ -27,7 +27,7 @@ no_index:
 provides:
   UnderscoreJS:
     file: lib/UnderscoreJS.pm
-    version: 0.05
+    version: 0.06
 requires:
   B: 0
   List::MoreUtils: 0
@@ -36,7 +36,7 @@ resources:
   bugtracker: https://github.com/vti/underscore-perl/issues
   homepage: https://github.com/vti/underscore-perl
   repository: git://github.com/vti/underscore-perl
-version: 0.05
+version: 0.06
 x_contributors:
   - 'richdouglasevans <rich.douglas.evans@gmail.com>'
   - 'vti <viacheslav.t@gmail.com>'
