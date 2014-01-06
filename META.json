@@ -52,7 +52,7 @@
    "provides" : {
       "UnderscoreJS" : {
          "file" : "lib/UnderscoreJS.pm",
-         "version" : "0.06"
+         "version" : "0.07"
       }
    },
    "release_status" : "stable",
@@ -66,7 +66,7 @@
          "web" : "https://github.com/vti/underscore-perl"
       }
    },
-   "version" : "0.06",
+   "version" : "0.07",
    "x_contributors" : [
       "richdouglasevans <rich.douglas.evans@gmail.com>",
       "vti <viacheslav.t@gmail.com>"
